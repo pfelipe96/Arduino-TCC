@@ -1,18 +1,21 @@
 #include <ESP8266WiFi.h>
 #include <ESP8266HTTPClient.h>
-#include <Wire.h>
 #include <ArduinoJson.h>
 
-char ssid[] = "dlink-F854";
-char password[] = "cdone55602";
+char ssidRouter[] = "dlink-F854";
+char passwordRouter[] = "cdone55602";
 
-const int pinoIVReflexivo1 = 16;
-const int pinoIVReflexivo2 = 5;
-const int pinoIVReflexivo3 = 4;
+const int firstCapactiveSensor = 5;
+const int secondCapactiveSensor = 4;
+const int thirdCapactiveSensor = 0;
 
-const int pinoLedToIV1 = 0;
-const int pinoLedToIV2 = 2;
-const int pinoLedToIV3 = 14;
+const int firstFloaterSensor = 14;
+const int secondFloaterSensor = 12;
+const int thirdFloaterSensor = 13;
+
+boolean isEnableFirstWaterLevel = false;
+boolean isEnableSecondWaterLevel = false;
+boolean isEnableThirdWaterLevel = false;
 
 HTTPClient http;
 
@@ -21,59 +24,73 @@ const char* host = "https://us-central1-tcc-2-33e61.cloudfunctions.net/saveLevel
 const int capacity = 3 * JSON_OBJECT_SIZE(3);
 StaticJsonDocument<capacity> payloadJson;
 JsonObject stationJson = payloadJson.createNestedObject("station");
+    
+WiFiClientSecure client;
 
-const char fingerprint[] PROGMEM =  "48 50 4E 97 4C 0D AC 5B 5C D4 76 C8 20 22 74 B2 4C 8C 71 72";
 
 void setup() {
   Serial.begin(9600);
 
   Serial.println("Setup");
   
+  setupConnectionToInternet();
+  setupPayloadToRequest();
+
+  pinMode(firstCapactiveSensor, INPUT_PULLUP);
+  pinMode(secondCapactiveSensor, INPUT_PULLUP);
+  pinMode(thirdCapactiveSensor, INPUT_PULLUP);
+
+  pinMode(firstFloaterSensor, INPUT);
+  pinMode(secondFloaterSensor, INPUT);
+  pinMode(thirdFloaterSensor, INPUT);
+}
+
+
+void setupConnectionToInternet(){
   WiFi.mode(WIFI_STA);
   WiFi.disconnect();
   delay(100);
 
   Serial.print("Connecting Wifi: ");
-  Serial.println(ssid);
-  WiFi.begin(ssid, password);
+  Serial.println(ssidRouter);
+  WiFi.begin(ssidRouter, passwordRouter);
   
   while (WiFi.status() != WL_CONNECTED) {
     Serial.print(".");
     delay(500);
   }
+  
   Serial.println("");
   Serial.println("WiFi connected");
   Serial.println("IP address: ");
   IPAddress ip = WiFi.localIP();
   Serial.println(ip);
-      
+
+  client.setInsecure();
+  client.connect(host, 443);
+}
+
+void setupPayloadToRequest(){
   payloadJson["token"] = "9a3e0058a226d3074a68a29813fc136b";
   payloadJson["level"] = 0;
   stationJson["name"] = "Estação João Dias 01";
   stationJson["address"] = "Avenida João Dias 2025";
   stationJson["id"] = "01";
-
-  pinMode(pinoIVReflexivo1, INPUT);
-  pinMode(pinoLedToIV1, OUTPUT);
-  digitalWrite(pinoLedToIV1, LOW);
-
-  pinMode(pinoIVReflexivo2, INPUT);
-  pinMode(pinoLedToIV2, OUTPUT);
-  digitalWrite(pinoLedToIV2, LOW);
-
-  pinMode(pinoIVReflexivo3, INPUT);
-  pinMode(pinoLedToIV3, OUTPUT);
-  digitalWrite(pinoLedToIV3, LOW);
 }
 
-
 void loop() {   
-  if (WiFi.status() == WL_CONNECTED) {
+  setupConnectionToHttps();
+  checkIfAllPairSensorsDisabled();
+  checkIfFirstPairSensorsEnabled();
+  checkIfSecondPairSensorsEnabled();
+  checkIfThirdPairSensorsEnabled();
+
+  delay(3000);
+}
+
+void setupConnectionToHttps(){
+   if (WiFi.status() == WL_CONNECTED) {
     String json;
-    
-    WiFiClientSecure client;
-    client.setInsecure(); //the magic line, use with caution
-    client.connect(host, 443);
 
     http.begin(client, host);
     http.addHeader("Content-Type", "application/json");
@@ -93,28 +110,38 @@ void loop() {
   } else {
     Serial.println("Error in WiFi connection");
   }
-  
-  if(digitalRead(pinoIVReflexivo1) == LOW){
-      digitalWrite(pinoLedToIV1, HIGH);
-      payloadJson["level"] = 1;
-  }else{ 
-    digitalWrite(pinoLedToIV1, LOW);
-    payloadJson["level"] = 0;
-  }
+}
 
-  if(digitalRead(pinoIVReflexivo2) == LOW){
-      digitalWrite(pinoLedToIV2, HIGH);
+void checkIfAllPairSensorsDisabled(){
+  if(digitalRead(firstCapactiveSensor) == HIGH && digitalRead(firstFloaterSensor) == LOW && isEnableFirstWaterLevel == true){
+     payloadJson["level"] = 0;
+     setWaterNivel(false, false, false);
+  }
+}
+
+void checkIfFirstPairSensorsEnabled(){
+  if(digitalRead(firstCapactiveSensor) == LOW && digitalRead(firstFloaterSensor) == HIGH){
+     payloadJson["level"] = 1;
+     setWaterNivel(true, false, false);
+  }
+}
+
+void checkIfSecondPairSensorsEnabled(){
+  if(digitalRead(secondCapactiveSensor) == LOW && digitalRead(secondFloaterSensor) == HIGH){
       payloadJson["level"] = 2;
-  }else{ 
-    digitalWrite(pinoLedToIV2, LOW);
+      setWaterNivel(false, true, false);
   }
+}
 
-  if(digitalRead(pinoIVReflexivo3) == LOW){
-      digitalWrite(pinoLedToIV3, HIGH);
+void checkIfThirdPairSensorsEnabled(){
+  if(digitalRead(thirdCapactiveSensor) == LOW && digitalRead(thirdFloaterSensor) == HIGH){
       payloadJson["level"] = 3;
-  }else{ 
-    digitalWrite(pinoLedToIV3, LOW);
+      setWaterNivel(false, false, true);
   }
+}
 
-  delay(3000);
+void setWaterNivel(boolean firstLevel, boolean secondLevel, boolean thirdLevel){
+    isEnableFirstWaterLevel = firstLevel;
+    isEnableSecondWaterLevel = secondLevel;
+    isEnableThirdWaterLevel = thirdLevel;
 }
